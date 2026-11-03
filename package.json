@@ -1,0 +1,12 @@
+{
+  "name": "seerr-requests-approval",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Seerr Request Approval Dashboard",
+  "scripts": {
+    "test": "npm run test --prefix client && npm run test --prefix server",
+    "test:client": "npm run test --prefix client",
+    "test:server": "npm run test --prefix server",
+    "test:watch": "npm run test:watch --prefix client"
+  }
+}
