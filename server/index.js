@@ -9,23 +9,40 @@ const { createLogger, format, transports } = require('winston');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const DEFAULT_SEERR_URL = process.env.SEERR_URL || 'http://10.0.0.134:5055';
-const SECRET_KEY = process.env.SECRET_KEY;
+const DEFAULT_SEERR_URL = process.env.SEERR_URL || 'http://localhost:5055';
+let SECRET_KEY = process.env.SECRET_KEY;
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '*';
 
 const DATA_DIR = path.join(__dirname, 'data');
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 
 // ---------------------------------------------------------------------------
-// Environment validation
+// Environment validation / auto-generate SECRET_KEY
+// (Called after logger init below)
 // ---------------------------------------------------------------------------
-if (!SECRET_KEY) {
-  console.error(
-    'FATAL: SECRET_KEY environment variable is required. ' +
-    'Generate with: openssl rand -hex 32'
-  );
-  process.exit(1);
-}
+let SECRET_KEY_FILE = path.join(DATA_DIR, '.secret_key');
+
+function ensureSecretKey() {
+  // Use console temporarily since logger may not be initialized yet
+  if (SECRET_KEY && SECRET_KEY !== 'auto') {
+    // User-provided key - use as-is
+    return;
+  }
+
+  // Check for persisted key in data volume
+  if (fs.existsSync(SECRET_KEY_FILE)) {
+    const storedKey = fs.readFileSync(SECRET_KEY_FILE, 'utf8').trim();
+    if (storedKey) {
+      SECRET_KEY = storedKey;
+      return;
+    }
+  }
+
+  // Auto-generate a new key and persist it in the data volume
+  // This ensures the key survives container restarts without needing .env
+  SECRET_KEY = crypto.randomBytes(32).toString('hex');
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(SECRET_KEY_FILE, SECRET_KEY);}
 
 if (!DEFAULT_SEERR_URL.startsWith('http://') && !DEFAULT_SEERR_URL.startsWith('https://')) {
   console.error(
@@ -51,6 +68,11 @@ const logger = createLogger({
     new transports.File({ filename: path.join(DATA_DIR, 'logs', 'combined.log') }),
   ],
 });
+
+// ---------------------------------------------------------------------------
+// Auto-generate / load SECRET_KEY (persisted in data volume)
+// ---------------------------------------------------------------------------
+ensureSecretKey()
 
 // ---------------------------------------------------------------------------
 // Ensure directories exist
@@ -147,16 +169,30 @@ loadConfig();
 const detailCache = new Map(); // key: `movie:${tmdbId}` or `tv:${tvdbId}` => { promise, timestamp }
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-function getCachedDetail(key, fetcher) {
+async function getCachedDetail(key, fetcher) {
   const now = Date.now();
   const cached = detailCache.get(key);
   if (cached && now - cached.timestamp < CACHE_TTL_MS) {
-    return cached.promise;
+    // Return cached promise if it resolved successfully;
+    // if it rejected, delete the stale entry and fetch fresh
+    try {
+      await cached.promise;
+      return cached.promise;
+    } catch {
+      detailCache.delete(key);
+    }
   }
-  const promise = fetcher().finally(() => {
-    // Remove from cache after resolution to allow fresh fetch next time
-    detailCache.delete(key);
-  });
+  const promise = fetcher()
+    .then((result) => {
+      // Cache successful result for the full TTL
+      detailCache.set(key, { promise: Promise.resolve(result), timestamp: Date.now() });
+      return result;
+    })
+    .catch((error) => {
+      // Remove failed promise from cache immediately
+      detailCache.delete(key);
+      throw error;
+    });
   detailCache.set(key, { promise, timestamp: now });
   return promise;
 }
