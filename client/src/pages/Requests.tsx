@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   getRequests,
   getRequestCounts,
+  getSettings,
   approveRequest,
   declineRequest,
   getDeclinedRequests,
