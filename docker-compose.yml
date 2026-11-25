@@ -5,11 +5,11 @@ services:
       - "5656:3000"
     environment:
       - PORT=3000
-      - SEERR_URL=http://10.0.0.134:5055
+      - SEERR_URL=${SEERR_URL:-http://host.docker.internal:5055}
       - SECRET_KEY=${SECRET_KEY}
-      - ALLOWED_ORIGIN=${ALLOWED_ORIGIN:-http://10.0.0.134:5656}
+      - ALLOWED_ORIGIN=${ALLOWED_ORIGIN:-http://localhost:5656}
       - NODE_ENV=production
-      - LOG_LEVEL=info
+      - LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
       - seerr-approval-data:/app/data
     restart: unless-stopped
@@ -19,6 +19,22 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+    networks:
+      - proxy-tier
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   seerr-approval-data:
+
+networks:
+  proxy-tier:
+    driver: bridge
